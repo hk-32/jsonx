@@ -15,28 +15,42 @@ func Encode(input interface{}) ([]byte, error) {
 	return out, nil
 }
 
+// numberToDigits - Checks if num is a number and formats number type to []byte
+func numberToDigits(value interface{}, refv reflect.Value) ([]byte, bool) {
+	switch refv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return []byte(strconv.FormatInt(refv.Int(), 10)), true
+	case reflect.Float32, reflect.Float64:
+		return []byte(strconv.FormatFloat(refv.Float(), 'f', -1, 64)), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return []byte(strconv.FormatUint(refv.Uint(), 10)), true
+	}
+	return nil, false
+}
+
 // build - Returns Objects, Arrays, Strings and Numbers in json grammar
-func build(thing interface{}) ([]byte, error) {
+func build(node interface{}) ([]byte, error) {
 	// Handle strings & numbers
-	if str, ok := thing.(string); ok {
+	if str, ok := node.(string); ok {
 		return append(append([]byte{'"'}, []byte(str)...), '"'), nil
-	} else if boolean, ok := thing.(bool); ok {
+	} else if boolean, ok := node.(bool); ok {
 		if boolean {
 			return []byte{'t', 'r', 'u', 'e'}, nil
 		}
 		return []byte{'f', 'a', 'l', 's', 'e'}, nil
-	} else if thing == nil {
+	} else if node == nil {
 		return []byte{'n', 'u', 'l', 'l'}, nil
 	}
+	container := reflect.ValueOf(node)
+	kind := container.Kind()
 
 	// Handle Arrays
-	if reflect.TypeOf(thing).Kind() == reflect.Slice {
-		array := reflect.ValueOf(thing)
-		len := array.Len()
+	if kind == reflect.Slice {
+		len := container.Len()
 
 		var builder = []byte{'['}
 		for i := 0; i < len; i++ {
-			if element, err := build(array.Index(i).Interface()); err == nil {
+			if element, err := build(container.Index(i).Interface()); err == nil {
 				builder = append(builder, element...)
 				// Add comma if i was not last
 				if i+1 < len {
@@ -51,16 +65,15 @@ func build(thing interface{}) ([]byte, error) {
 	}
 
 	// Handle Objects
-	if reflect.TypeOf(thing).Kind() == reflect.Map {
-		object := reflect.ValueOf(thing)
-		len := object.Len()
+	if kind == reflect.Map {
+		len := container.Len()
 
 		var builder = []byte{'{'}
-		for i, keyV := range object.MapKeys() {
+		for i, keyV := range container.MapKeys() {
 			if key, ok := keyV.Interface().(string); ok {
 				builder = append(append(append(builder, '"'), []byte(key)...), '"', ':')
 
-				if element, err := build(object.MapIndex(keyV).Interface()); err == nil {
+				if element, err := build(container.MapIndex(keyV).Interface()); err == nil {
 					builder = append(builder, element...)
 					// Add comma if i was not last
 					if i+1 < len {
@@ -75,21 +88,10 @@ func build(thing interface{}) ([]byte, error) {
 		return builder, nil
 	}
 
-	// Handle Numbers - 1894 KB
-	switch reflect.TypeOf(thing).Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return []byte(strconv.FormatInt(reflect.ValueOf(thing).Int(), 10)), nil
-	case reflect.Float32, reflect.Float64:
-		return []byte(strconv.FormatFloat(reflect.ValueOf(thing).Float(), 'f', -1, 64)), nil
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return []byte(strconv.FormatUint(reflect.ValueOf(thing).Uint(), 10)), nil
+	// Handle Numbers - 1891 KB
+	if num, ok := numberToDigits(node, container); ok {
+		return num, nil
 	}
-
-	// Handle Numbers - 2085 KB
-	/*switch v := thing.(type) {
-	case int, int16, int32, int64, float32, float64:
-		return []byte(fmt.Sprintf("%v", v)), nil
-	}*/
 
 	return nil, ErrDefault
 }
