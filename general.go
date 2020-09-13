@@ -17,8 +17,8 @@ var pow10tab = [...]float64{
 // ErrDefault - Default error for Decode()
 var ErrDefault = errors.New("JSON could not be parsed")
 
-// decoder - Internal structure for keeping track of state
-type decoder struct {
+// state - Internal structure for keeping track of state
+type state struct {
 	source []byte // The whole input
 	pos    int    // Current position in source
 	len    int    // Lenght of source
@@ -35,32 +35,32 @@ const (
 	// EOS - Used internally to signify end of stream
 	iEOS byte = 0x03 // 0x03 = End of Text, 0x04 = End of Transmission
 	// Star - Used internally to support jsonc: Json Comments
-	iStar = byte('*')
+	iStar byte = '*'
 	// Slash - Used internally to support jsonc: Json Comments
-	iFSlash = byte('/')
+	iFSlash byte = '/'
 
 	// Dot - Used internally for reading floats
-	iDot = byte('.')
+	iDot byte = '.'
 	// Quotation - Used internally for reading strings
-	iQuotation = byte('"')
+	iQuotation byte = '"'
 
 	// Hyphen - Syntax literal negative
-	iHyphen = byte('-')
+	iHyphen byte = '-'
 
 	// Comma - Syntax literal comma
-	iComma = byte(',')
+	iComma byte = ','
 	// Colon - Syntax literal colon
-	iColon = byte(':')
+	iColon byte = ':'
 
 	// LeftBrace - Syntax literal to start an object
-	iLeftBrace = byte('{')
+	iLeftBrace byte = '{'
 	// RightBrace - Syntax literal to end an object
-	iRightBrace = byte('}')
+	iRightBrace byte = '}'
 
 	// LeftBracket - Syntax literal to start a list
-	iLeftBracket = byte('[')
+	iLeftBracket byte = '['
 	// RightBracket - Syntax literal to end a list
-	iRightBracket = byte(']')
+	iRightBracket byte = ']'
 )
 
 // ByteDigitsToInt - Option to change ByteDigitsToNumber incase you want int values
@@ -76,7 +76,7 @@ func ByteDigitsToInt(ByteNums []byte, isNegative bool) interface{} {
 }
 
 // get - Returns the value of a given index in source
-func (state *decoder) get(n int) byte {
+func (state *state) get(n int) byte {
 	if n < state.len {
 		return state.source[n]
 	}
@@ -84,7 +84,7 @@ func (state *decoder) get(n int) byte {
 }
 
 // peek - Returns the first non-space without advancing the position
-func (state *decoder) peek() byte {
+func (state *state) peek() byte {
 	for i := state.pos; i < state.len; i++ {
 		if isSpace(state.source[i]) {
 			return state.source[i]
@@ -94,7 +94,7 @@ func (state *decoder) peek() byte {
 }
 
 // swallow - Returns the first non-space and advances the position
-func (state *decoder) swallow() byte {
+func (state *state) swallow() byte {
 	for state.pos+1 < state.len {
 		state.pos++
 		if !isSpace(state.source[state.pos]) {

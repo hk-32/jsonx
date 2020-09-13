@@ -1,13 +1,15 @@
 package jsonx
 
-import "unsafe"
+import (
+	"unsafe"
+)
 
 // ByteDigitsToNumber - Formats digits from []byte -> your type (default float64)
 var ByteDigitsToNumber = ByteDigitsToFloat64
 
 // Decode - Decodes the input
 func Decode(input []byte) (interface{}, error) {
-	dec := decoder{source: input, pos: -1, len: len(input)}
+	dec := state{source: input, pos: -1, len: len(input)}
 	out, err := dec.compose()
 
 	// Just to make sure that out is nothing except for nil on failure
@@ -17,8 +19,8 @@ func Decode(input []byte) (interface{}, error) {
 	return out, nil
 }
 
-// build - Returns Objects, Arrays, Strings and Numbers with err nil, rest as byte but err
-func (state *decoder) compose() (interface{}, error) {
+// compose - Returns Objects, Arrays, Strings and Numbers with err nil, rest as byte but err
+func (state *state) compose() (interface{}, error) {
 	Byte := state.swallow()
 
 	// Parse Arrays
@@ -32,20 +34,23 @@ func (state *decoder) compose() (interface{}, error) {
 				structure = append(structure, element)
 
 				// Swallow next... should be an iComma or an iRightBracket
-				switch state.swallow() {
-				case iComma:
+				Byte = state.swallow()
+				if Byte == iComma {
 					// There is more to come...
 					continue
-				case iRightBracket:
+				} else if Byte == iRightBracket {
 					// The end has been reached.
 					return structure, nil
 				}
+				// Error Unexpected Token: Expected a Comma or a RightBracket
+				return Byte, ErrDefault
+
 			} else if element == iRightBracket && len(structure) == 0 {
 				// Array had nothing...
 				return structure, nil
 			}
 			// Error ... element can be iEOS or something that does not make sense here
-			return nil, ErrDefault
+			return element, ErrDefault
 		}
 	}
 
@@ -61,38 +66,67 @@ func (state *decoder) compose() (interface{}, error) {
 			if value, err = state.compose(); err == nil {
 				if key, isString = value.(string); isString {
 					// Swallow a colon
-					if state.swallow() == iColon {
+					Byte = state.swallow()
+					if Byte == iColon {
 						// Build value
 						if value, err = state.compose(); err == nil {
 							holder[key] = value
 
 							// Swallow next... should be an iComma or an iRightBrace
-							next := state.swallow()
-							if next == iComma {
+							Byte = state.swallow()
+							if Byte == iComma {
 								// There is more to come...
 								continue
-							} else if next == iRightBrace {
+							} else if Byte == iRightBrace {
 								// The end has been reached.
 								break
 							}
+							// Error Unexpected Token: Expected a Comma or a RightBracket
+							return Byte, ErrDefault
+
 						}
 					}
-				} else if value == iRightBrace && len(holder) == 0 {
-					// Object had nothing...
-					return holder, nil
+					// Error Unexpected Token: Expected a Colon
+					return Byte, ErrDefault
 				}
+				// Error ... expected a string as key but got something else
+				return value, ErrDefault
+			} else if value == iRightBrace && len(holder) == 0 {
+				// Object had nothing...
+				return holder, nil
 			}
-			// Error ... next can be EOS or something that does not make sense here
-			return nil, ErrDefault
+			// Error ... next can be iEOS or something that does not make sense here
+			return value, ErrDefault
 		}
 		return holder, nil
 	}
 
 	// Parse Strings
 	if Byte == iQuotation {
+		// Get string lenght:
+		// OPTIMIZATION TO GET THE LENGHT OF THE STRING SO A SLICE CAN BE ALLOCATED ACCORDINGLY
+		var sLen int
+		for Byte = state.get(state.pos + 1); Byte != iQuotation; Byte = state.get(state.pos + sLen + 1) {
+			if Byte == iEOS {
+				// Json strings can't end unfinished, so error out
+				return nil, ErrDefault
+			}
+			sLen++
+		}
+		var str = make([]byte, sLen)
+		// Now just read sLen amount of bytes
+		for i := 1; i <= sLen; i++ {
+			str[i-1] = state.get(state.pos + i)
+		}
+		// Now changes position to the ending iQuotation's
+		state.pos += sLen + 1
+		return *(*string)(unsafe.Pointer(&str)), nil
+	}
+	/*if Byte == iQuotation {
 		state.pos++
 		var l int
-		// Get string lenght
+		// Get string lenght:
+		// OPTIMIZATION TO GET THE LENGHT OF THE STRING SO A SLICE CAN BE ALLOCATED ACCORDINGLY
 		for Byte = state.get(state.pos); Byte != iQuotation; Byte = state.get(state.pos + l) {
 			if Byte == iEOS {
 				// Json strings can't end unfinished, so error out
@@ -101,7 +135,7 @@ func (state *decoder) compose() (interface{}, error) {
 			l++
 		}
 
-		var str = make([]byte, l)
+		var str = make([]byte, l-1)
 		l = 0
 		// Read everything till next iQuotation
 		for Byte = state.get(state.pos); Byte != iQuotation; Byte = state.get(state.pos + l) {
@@ -111,7 +145,7 @@ func (state *decoder) compose() (interface{}, error) {
 		// Success
 		state.pos += l
 		return *(*string)(unsafe.Pointer(&str)), nil
-	}
+	}*/
 
 	// Parse Numbers
 	if isDigit(Byte) || Byte == iHyphen {
